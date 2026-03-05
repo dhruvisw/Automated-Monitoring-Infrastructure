@@ -1,0 +1,28 @@
+kind: pipeline
+type: docker
+name: feature190-monitoring
+
+clone:
+  skip_verify: true
+
+steps:
+  - name: verify-and-execute
+    image: ubuntu:24.04
+    volumes:
+      - name: docker_socket
+        path: /var/run/docker.sock
+    commands:
+      - apt-get update && apt-get install -y python3 docker.io
+      - cd feature190/
+      - chmod +x mysolution mycheck
+      - python3 ./mysolution
+      - python3 ./mycheck
+
+volumes:
+  - name: docker_socket
+    host:
+      path: /var/run/docker.sock
+
+trigger:
+  branch:
+    - feature*

@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""
+Automated validation of an infrastructure monitoring setup using Prometheus.
+
+This script validates monitoring correctness by checking only guarantees that
+Prometheus actually provides:
+- target discovery
+- failure detection
+
+The script is deterministic and designed for CI/CD execution.
+"""
+
+import subprocess
+import time
+import sys
+import json
+
+
+# Configuration Variables
+
+
+TARGET_NAME = "demo-target"
+TARGET_PORTS = [9100, 9200]
+SCRAPE_INTERVAL = "5s"  # must match Prometheus configuration
+
+PROMETHEUS_CONTAINER = "prometheus"
+QUERY_URL = "http://localhost:9090/api/v1/targets"
+
+TARGETS = [
+    f"{TARGET_NAME}-1",
+    f"{TARGET_NAME}-2",
+]
+FAILED_TARGET = TARGETS[1]
+
+SCRAPE_WAIT_SECONDS = 30  # >= SCRAPE_INTERVAL
+
+
+# Helper Functions
+
+
+def run(command):
+    return subprocess.check_output(command, shell=True, text=True)
+
+
+# Validation Logic
+
+
+print("⏳ Waiting for initial Prometheus scrape...")
+time.sleep(SCRAPE_WAIT_SECONDS)
+
+# Query Prometheus API
+try:
+    raw_output = run(
+        f"docker exec {PROMETHEUS_CONTAINER} wget -qO- {QUERY_URL}"
+    )
+    data = json.loads(raw_output)
+except Exception as e:
+    print("❌ Failed to query Prometheus API")
+    print(e)
+    sys.exit(1)
+
+active_targets = data["data"]["activeTargets"]
+
+
+# Contract C1: Discovery
+
+registered_targets = [
+    t["labels"]["instance"].split(":")[0]
+    for t in active_targets
+]
+
+for target in TARGETS:
+    if target not in registered_targets:
+        print(f"❌ Contract violation (C1): {target} not registered")
+        sys.exit(1)
+
+print("✅ Contract C1 satisfied: all targets registered")
+
+
+# Contract C2: Failure Detection
+
+print(f"⚠️ Simulating failure of {FAILED_TARGET}...")
+subprocess.run(
+    f"docker stop {FAILED_TARGET}",
+    shell=True,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+time.sleep(SCRAPE_WAIT_SECONDS)
+
+raw_output = run(
+    f"docker exec {PROMETHEUS_CONTAINER} wget -qO- {QUERY_URL}"
+)
+data = json.loads(raw_output)
+active_targets = data["data"]["activeTargets"]
+
+health_map = {
+    t["labels"]["instance"].split(":")[0]: t["health"].lower()
+    for t in active_targets
+}
+
+if health_map.get(FAILED_TARGET) != "down":
+    print(
+        f"❌ Contract violation (C2): {FAILED_TARGET} not marked DOWN"
+    )
+    sys.exit(1)
+
+print("✅ Contract C2 satisfied: failed target detected as DOWN")
+
+print("All monitoring correctness contracts satisfied")
+sys.exit(0)

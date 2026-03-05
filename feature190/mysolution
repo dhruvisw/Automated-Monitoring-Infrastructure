@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""
+This script automates the provisioning of an infrastructure monitoring setup
+using Prometheus.
+
+What this script does:
+- Guarantees idempotent execution (safe to run multiple times)
+- Creates a dedicated Docker network for monitoring
+- Starts multiple independently running target servers
+- Dynamically generates the Prometheus configuration
+- Starts a Prometheus monitoring server
+- Brings the system into a known, stable monitoring state
+
+This script represents Infrastructure as Code (IaC), allowing the entire
+infrastructure to be recreated deterministically.
+"""
+
+import subprocess
+import textwrap
+import time
+
+
+# Configuration Variables
+
+
+TARGET_NAME = "demo-target"
+TARGET_PORTS = [9100, 9200]
+SCRAPE_INTERVAL = "5s"
+
+NETWORK_NAME = "monitoring_net"
+PROMETHEUS_CONTAINER = "prometheus"
+PROM_CONFIG_FILE = "prometheus.yml"
+
+
+# Derived Configuration
+
+TARGETS = [
+    {"name": f"{TARGET_NAME}-1", "port": TARGET_PORTS[0]},
+    {"name": f"{TARGET_NAME}-2", "port": TARGET_PORTS[1]},
+]
+
+
+# Helper Functions
+
+
+def run(command):
+    print(f"Running: {command}")
+    subprocess.run(command, shell=True, check=True)
+
+
+# Idempotent Cleanup
+
+
+print("🧹 Ensuring idempotent state (cleanup if necessary)...")
+
+for target in TARGETS:
+    run(f"docker rm -f {target['name']} 2>/dev/null || true")
+
+run(f"docker rm -f {PROMETHEUS_CONTAINER} 2>/dev/null || true")
+run(f"docker network rm {NETWORK_NAME} 2>/dev/null || true")
+
+
+# Network Provisioning
+
+
+run(f"docker network create {NETWORK_NAME}")
+
+
+# Prometheus Configuration
+
+
+target_entries = ", ".join(
+    [f"'{t['name']}:{t['port']}'" for t in TARGETS]
+)
+
+prometheus_config = textwrap.dedent(f"""
+global:
+  scrape_interval: {SCRAPE_INTERVAL}
+
+scrape_configs:
+  - job_name: 'monitoring_job'
+    static_configs:
+      - targets: [{target_entries}]
+""")
+
+with open(PROM_CONFIG_FILE, "w") as f:
+    f.write(prometheus_config)
+
+
+# Start Target Servers
+
+
+for target in TARGETS:
+    run(
+        f"docker run -d --rm "
+        f"--name {target['name']} "
+        f"--network {NETWORK_NAME} "
+        f"python:3.10-slim "
+        f"python -m http.server {target['port']}"
+    )
+
+
+# 1. Start Prometheus without the volume mount
+run(
+    f"docker run -d "
+    f"--name {PROMETHEUS_CONTAINER} "
+    f"--network {NETWORK_NAME} "
+    f"prom/prometheus"
+)
+
+# 2. Copy the configuration file from your runner into the container
+run(f"docker cp {PROM_CONFIG_FILE} {PROMETHEUS_CONTAINER}:/etc/prometheus/prometheus.yml")
+
+# 3. Restart the container so Prometheus loads the new config
+run(f"docker restart {PROMETHEUS_CONTAINER}")
+
+# Stabilization Delay
+
+print("⏳ Waiting for Prometheus to initialize...")
+time.sleep(5)
+
+print("✅ Monitoring infrastructure successfully provisioned.")
