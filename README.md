@@ -1,3 +1,1 @@
-# dhruvi.swadia
-
-CloudDevOps lecture and exercises repository
+# automated-monitoring-infrastructure
