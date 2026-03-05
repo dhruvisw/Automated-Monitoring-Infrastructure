@@ -6,10 +6,15 @@ The project simulates a distributed system with detached servers and demonstrate
 
 # 📌 Project Highlights
 ⚙️ Infrastructure as Code – automated provisioning of monitoring infrastructure
+
 🐳 Detached containerized servers – simulate distributed services
+
 📡 Prometheus monitoring – pull-based metrics scraping
+
 🔁 CI/CD automation – infrastructure validated through a Drone pipeline
+
 🚨 Failure detection testing – intentionally simulate server failures
+
 🧩 Configurable architecture – system behavior controlled through variables
 
 # ⚙️ Tech Stack
